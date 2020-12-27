@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Garden</title>
+    <style>
+      body {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="output"></div>
+    <canvas id="game-canvas"></canvas>
+    <script>
+      const CELL_SIZE = 5;
+      const GRID_COLOR = "#CCCCCC";
+      const ACTIVE_COLOR = "#000000";
+      const INACTIVE_COLOR = "#FFFFFF";
+      const WIDTH = {{ width }};
+      const HEIGHT = {{ height }};
+
+      const canvas = document.getElementById("game-canvas");
+      canvas.height = (CELL_SIZE + 1) * HEIGHT + 1;
+      canvas.width = (CELL_SIZE + 1) * WIDTH + 1;
+
+      const ctx = canvas.getContext('2d');
+
+      const drawGrid = () => {
+          ctx.beginPath();
+          ctx.strokeStyle = GRID_COLOR;
+
+          // Vertical Lines
+          for (let i = 0; i <= WIDTH; i ++) {
+              ctx.moveTo(i * (CELL_SIZE + 1) + 1, 0);
+              ctx.lineTo(i * (CELL_SIZE + 1) + 1, (CELL_SIZE + 1) * HEIGHT);
+          }
+
+          // Horizontal Lines
+          for (let j = 0; j <= HEIGHT; j ++) {
+              ctx.moveTo(0,                           j * (CELL_SIZE + 1) + 1)
+              ctx.lineTo((CELL_SIZE + 1) * WIDTH + 1, j * (CELL_SIZE + 1) + 1);
+          }
+
+          ctx.stroke();
+      };
+
+      const drawCells = (cells) => {
+        for (let x = 0; x <= WIDTH; x++) {
+          for (let y =0; y <= HEIGHT; y++) {
+            ctx.fillStyle = INACTIVE_COLOR;
+            ctx.fillRect(
+              y * (CELL_SIZE + 1) + 1,
+              x * (CELL_SIZE + 1) + 1,
+              CELL_SIZE,
+              CELL_SIZE
+            );
+          }
+        }
+        for (let i = 0; i < cells.length; i++) {
+          ctx.fillStyle = ACTIVE_COLOR;
+          ctx.fillRect(
+            cells[i].y * (CELL_SIZE + 1) + 1,
+            cells[i].x * (CELL_SIZE + 1) + 1,
+            CELL_SIZE,
+            CELL_SIZE
+          );
+        }
+      }
+      
+      const render = (cells) => {
+        drawGrid();
+        console.log(cells);
+        drawCells(cells);
+      };
+
+      function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      var wsUri = "ws://{{ host_address }}:7878/websocket";
+      var output;
+
+      async function update()
+      {
+        output = document.getElementById("output");
+        websocket = new WebSocket(wsUri);
+        websocket.onopen = function(evt) { onOpen(evt) };
+        websocket.onclose = function(evt) { onClose(evt) };
+        websocket.onmessage = function(evt) { onMessage(evt) };
+        websocket.onerror = function(evt) { onError(evt) };
+      }
+
+      function onOpen(evt)
+      {
+      }
+
+      function doSend(message)
+      {
+        websocket.send(message);
+      }
+
+      function onClose(evt)
+      {
+        console.log("Websocket DISCONNECTED");
+      }
+
+      function onMessage(evt)
+      {
+        cells = JSON.parse(evt.data);
+        render(cells);
+      }
+
+      function onError(evt)
+      {
+        console.log("Websocket ERROR:" + evt.data);
+      }
+
+
+      window.addEventListener("load", update, false);
+
+  </script>
+  </body>
+</html>

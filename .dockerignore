@@ -1,0 +1,7 @@
+# Ignore everything
+*
+
+!src
+!templates
+!Cargo.toml
+!Cargo.lock
