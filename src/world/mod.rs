@@ -4,16 +4,16 @@ use rand::prelude::*;
 mod pathfinding;
 
 pub struct World{
-    pub width: u8,
-    pub height: u8,
+    pub width: i32,
+    pub height: i32,
     // Sync and Send are required to ensure entities are thread-safe
     entities: Vec<EntityType>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
 pub struct Position {
-    pub x: u8,
-    pub y: u8,
+    pub x: i32,
+    pub y: i32,
 }
 
 #[allow(dead_code)]
@@ -27,7 +27,7 @@ pub enum Direction {
 type EntityType = Box<dyn Updateable + Sync + Send>;
 
 impl World {
-    pub fn new(width: u8, height: u8) -> World{
+    pub fn new(width: i32, height: i32) -> World{
         World {
             height: height,
             width: width,
@@ -56,8 +56,8 @@ impl World {
         }
     }
 
-    pub fn get_height(&self) -> &u8 { &self.height}
-    pub fn get_width(&self) -> &u8 { &self.width }
+    pub fn get_height(&self) -> &i32 { &self.height}
+    pub fn get_width(&self) -> &i32 { &self.width }
 
     pub fn get_cells(&self) -> Vec<&Position> { 
         let mut positions = vec![];

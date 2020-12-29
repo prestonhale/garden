@@ -115,8 +115,8 @@ pub fn start_tcp_server(world_ref_counter: &Arc<RwLock<world::World>>, config: C
 #[template(path = "index.html")]
 struct IndexTemplate<'a> {
     host_address: &'a str,
-    width: u8,
-    height: u8,
+    width: i32,
+    height: i32,
 }
 
 fn handle_index(mut stream: &TcpStream, address_ref: &str, world_ref: &Arc<RwLock<world::World>>) {

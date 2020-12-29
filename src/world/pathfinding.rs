@@ -1,12 +1,15 @@
 use petgraph::graphmap::{UnGraphMap};
 use petgraph::algo::{astar};
+use petgraph::visit::GraphBase;
 
 use super::*;
 
-fn graph_from_world(world: &World) -> UnGraphMap<(u8, u8), ()> {
+type GardenGraph = UnGraphMap<(i32, i32), ()>;
+
+fn graph_from_world(world: &World) -> GardenGraph {
     let mut g = UnGraphMap::new();
-    for x in 0..world.width {
-        for y in 0..world.height {
+    for x in 0..*world.get_width() {
+        for y in 0..*world.get_height() {
 
             let node = g.add_node((x, y));
             // Add all neighbors to cell
@@ -17,14 +20,14 @@ fn graph_from_world(world: &World) -> UnGraphMap<(u8, u8), ()> {
                 (-1, 0) // W
             ].iter()
             {
-                let neighbor_x = x as i8 + x_diff;
-                let neighbor_y = y as i8 + y_diff;
+                let neighbor_x = x + x_diff;
+                let neighbor_y = y + y_diff;
                 if neighbor_x < 0 
-                    || neighbor_x >= world.width as i8 
+                    || neighbor_x >= world.width
                     || neighbor_y < 0 
-                    || neighbor_y >= world.height as i8 { 
+                    || neighbor_y >= world.height { 
                         continue };
-                let neighbor = g.add_node((neighbor_x as u8, neighbor_y as u8));
+                let neighbor = g.add_node((neighbor_x, neighbor_y));
                 g.add_edge(node, neighbor, ());
             }
 
@@ -37,13 +40,16 @@ pub fn a_star_pathfind(cur_pos: &Position, goal: &Position, world: &World) -> (u
     let mut graph = graph_from_world(world);
     let a = graph.add_node((cur_pos.x, cur_pos.y));
     let f = graph.add_node((goal.x, goal.y));
-    // TODO: Fix final param which should be manhattan distance heuristic
-    if let Some(result) = astar(&graph, a, |finish| finish == f, |_| 1, |_| 0) {
+    let edge_cost_one = |_| { 1 };
+    let manhattan_distance_heuristic = |cur_node: <GardenGraph as GraphBase>::NodeId| {
+        (a.0 - cur_node.0) + (a.1 - cur_node.1)
+    };
+    if let Some(result) = astar(&graph, a, |finish| finish == f, edge_cost_one, manhattan_distance_heuristic) {
         let (cost, path) = result;
         if cost == 0 {
             panic!("Called for pathfinding but already on goal square");
         }
-        (cost, Position { x: path[1].0, y: path[1].1 })
+        (cost as usize, Position { x: path[1].0, y: path[1].1 })
     } else {
         panic!("Goal is unreachable!");
     }
