@@ -27,7 +27,15 @@ pub enum Direction {
 type EntityType = Box<dyn Updateable + Sync + Send>;
 
 impl World {
-    pub fn new() -> World{
+    pub fn new(width: u8, height: u8) -> World{
+        World {
+            height: height,
+            width: width,
+            entities: vec![],
+        }
+    }
+
+    pub fn default() -> World {
         let entities: Vec<EntityType> = vec![
             Box::new(Eater {
                 position: Position { x: 15, y: 15 }
@@ -35,7 +43,10 @@ impl World {
             Box::new(FoodSpawner {
                 last_spawned: 0,
                 spawn_every_x_ticks: 5,
-            })
+            }),
+            Box::new(Food {
+                position: Position { x: 20, y: 20 }
+            }),
         ];
 
         World{

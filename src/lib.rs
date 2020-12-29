@@ -38,7 +38,7 @@ impl Config {
 
 pub fn run(config: Config) {
     // TODO: The world is mutable in non-primary threads and should not be
-    let world_ref_counter = Arc::new(RwLock::new(world::World::new()));
+    let world_ref_counter = Arc::new(RwLock::new(world::World::default()));
     let primary_world_instance = Arc::clone(&world_ref_counter);
     thread::spawn(move || {
         let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
@@ -179,6 +179,8 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
                 if let Err(e) = websocket.close(None) {
                     if let tungstenite::Error::ConnectionClosed = e {
                         return
+                    } else if let tungstenite::Error::Io(_) = e {
+                        return
                     } else {
                         panic!("Unexpected error closing websocket: {:?}", e)
                     };
@@ -227,7 +229,7 @@ mod tests {
     fn test_handle_index() {
         let _ = spawn(move || {
             let server = TcpListener::bind("localhost:7880").expect("Can't listen, is port already used?");
-            let world_ref_counter = Arc::new(RwLock::new(world::World::new()));
+            let world_ref_counter = Arc::new(RwLock::new(world::World::default()));
             let stream = server.incoming().next().unwrap().unwrap();
             let mock_config = get_mock_config();
             handle_index(&stream, &mock_config.host_address[..], &world_ref_counter);
@@ -270,7 +272,7 @@ mod tests {
         // Setup world instance
         // ==============================
         // Warning: As world creation expands this will need to be mocked
-        let world_ref_counter = Arc::new(RwLock::new(world::World::new()));
+        let world_ref_counter = Arc::new(RwLock::new(world::World::default()));
         let primary_world_instance = Arc::clone(&world_ref_counter);
         thread::spawn(move || {
             let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");

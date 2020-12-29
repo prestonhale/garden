@@ -57,9 +57,7 @@ mod test {
 
     #[test]
     fn test_graph_from_world() {
-        let mut world = World::new();
-        world.height = 3;
-        world.width = 3;
+        let world = World::new(3, 3);
         let graph = graph_from_world(&world);
 
         assert_eq!(graph.node_count(), 9);
