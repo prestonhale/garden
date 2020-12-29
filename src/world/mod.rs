@@ -1,5 +1,6 @@
 use serde::{Serialize, Deserialize};
 use rand::prelude::*;
+use std::collections::HashMap;
 
 mod pathfinding;
 
@@ -37,12 +38,10 @@ impl World {
 
     pub fn default() -> World {
         let entities: Vec<EntityType> = vec![
-            Box::new(Eater {
-                position: Position { x: 15, y: 15 }
-            }),
+            Box::new(Eater::new()),
             Box::new(FoodSpawner {
                 last_spawned: 0,
-                spawn_every_x_ticks: 15,
+                spawn_every_x_ticks: 20,
             }),
             Box::new(Food {
                 position: Position { x: 20, y: 20 }
@@ -50,14 +49,18 @@ impl World {
         ];
 
         World{
-            width: 50,
-            height: 50,
+            width: 30,
+            height: 30,
             entities: entities,
         }
     }
 
     pub fn get_height(&self) -> &i32 { &self.height}
     pub fn get_width(&self) -> &i32 { &self.width }
+
+    pub fn add_entity(&mut self, entity: EntityType) {
+        self.entities.push(entity);
+    }
 
     pub fn get_cells(&self) -> Vec<&Position> { 
         let mut positions = vec![];
@@ -197,7 +200,7 @@ impl World {
 
 }
 
-trait Updateable {
+pub trait Updateable {
     fn update(&self, world: &World, rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>);
     fn get_position(&self) -> &Position;
     fn get_tag(&self) -> &str { "untagged" }
@@ -256,15 +259,23 @@ impl Food {
     }
 }
 
-#[derive(Copy, Clone)]
-struct Eater {
-    position: Position
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+enum Desire {
+    Hunger
 }
 
+
+#[derive(Clone)]
+struct Eater {
+    position: Position,
+    desires: HashMap<Desire, i8>,
+    desire_threshold: HashMap<Desire, i8>,
+}
+
+#[derive(Debug, PartialEq)]
 enum EaterGoal {
     GetFood(usize),
     Wander,
-    DoNothing,
 }
 
 impl Updateable for Eater {
@@ -272,15 +283,18 @@ impl Updateable for Eater {
         let mut new_eater = self.clone();
         let mut removed_entity_index = None;
         
+        new_eater.increment_desire(Desire::Hunger, 1);
+
         let goal = self.select_goal(world);
         match goal {
-            EaterGoal::DoNothing => {},
-            EaterGoal::Wander => {},
+            EaterGoal::Wander => {
+            },
             EaterGoal::GetFood(i) => {
                 let food_entity = &world.entities[i];
                 let (cost, next_position) = self.pathfind(food_entity.get_position(), world);
                 if cost == 1 {
                     removed_entity_index = Some(i);
+                    new_eater.increment_desire(Desire::Hunger, -20);
                 } else {
                     new_eater.position = next_position;
                 }
@@ -293,13 +307,55 @@ impl Updateable for Eater {
 }
 
 impl Eater {
-    fn select_goal(&self, world: &World) -> EaterGoal {
-        let entities = self.get_line_of_sight_entities(world);
-        if entities.len() == 0 {
-            EaterGoal::DoNothing
-        } else {
-            EaterGoal::GetFood(entities[0])
+    fn new() -> Eater {
+        let mut desires = HashMap::new();
+        desires.insert(Desire::Hunger, 0);
+
+        let mut desire_threshold = HashMap::new();
+        desire_threshold.insert(Desire::Hunger, 0);
+
+        Eater {
+            position: Position{ x:0, y:0 },
+            desires: desires,
+            desire_threshold: desire_threshold,
         }
+    }
+
+    fn set_desire(&mut self, desire: Desire, level: i8) {
+        self.desires.insert(desire, level);
+    }
+
+    fn get_desire(&self, desire: Desire) -> i8 {
+        match self.desires.get(&desire) {
+            Some(i) => *i,
+            None => panic!("Asked for desire that isn't on entity")
+        }
+    }
+
+    fn increment_desire(&mut self, desire: Desire, increment: i8) {
+        let mut new_desire = self.get_desire(desire) + increment;
+        if new_desire < 0 { new_desire = 0 }
+        self.set_desire(desire, new_desire);
+    }
+
+    fn get_desire_threshold(&self, desire: Desire) -> i8 {
+        match self.desire_threshold.get(&desire) {
+            Some(i) => *i,
+            None => panic!("Asked for desire threshold that isn't on entity")
+        }
+    }
+
+    fn select_goal(&self, world: &World) -> EaterGoal {
+        let goal: EaterGoal;
+        let entities = self.get_line_of_sight_entities(world);
+        if self.get_desire(Desire::Hunger) > self.get_desire_threshold(Desire::Hunger) 
+            && entities.len() > 0
+        {
+            goal = EaterGoal::GetFood(entities[0])
+        } else {
+            goal = EaterGoal::Wander;
+        }
+        goal
     }
 
     fn get_line_of_sight_entities<'a>(&self, world: &'a World) -> Vec<usize>{

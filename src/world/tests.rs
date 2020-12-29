@@ -17,3 +17,24 @@ fn test_food_spawner() {
     world.update(&mut randomizer);
     assert_eq!(world.entities.len(), 2);
 }
+
+#[test]
+fn test_eater_wander_goal() {
+    let mut world = World::new(10, 10);
+    let food = Box::new(Food {position: Position { x: 0, y: 0 }});
+    world.add_entity(food);
+    let eater = Eater::new();
+    let goal = eater.select_goal(&world);
+    assert_eq!(EaterGoal::Wander, goal);
+}
+
+#[test]
+fn test_eater_food_goal() {
+    let mut world = World::new(10, 10);
+    let food = Box::new(Food {position: Position { x: 0, y: 0 }});
+    world.add_entity(food);
+    let mut eater = Eater::new();
+    eater.set_desire(Desire::Hunger, 51);
+    let goal = eater.select_goal(&world);
+    assert_eq!(EaterGoal::GetFood(0), goal);
+}

@@ -20,9 +20,7 @@ use console::Term;
 mod thread_pool;
 mod world;
 
-
-// Note on RNG: Rng is cached per thread. As long as world mutation only occurs
-// in the primary thread (and it really should), we can use rand lib directly
+const TICK_RATE_MS: u64 = 100;
 
 pub struct Config {
     pub host_address: String,
@@ -44,7 +42,7 @@ pub fn run(config: Config) {
         let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
         loop {
             // TODO: Fix timescale
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(TICK_RATE_MS));
             // A possible optimization: Have world calculate its value without
             // getting a lock. Only lock when updating the value. Would need to
             // test how often the lock is preventing reads.
@@ -70,7 +68,7 @@ pub fn run(config: Config) {
                     _ => panic!("Failed to clear screen"),
                 };
             }
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(TICK_RATE_MS));
         }
     } else {
         start_tcp_server(&world_ref_counter, config);
@@ -204,11 +202,11 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
         let result;
         match serde_json::to_string(&player) {
             Ok(serialized_player) => result = format!("{}", serialized_player),
-            _ => panic!("Unable to serialize palyer"),
+            _ => panic!("Unable to serialize player"),
         };
         let response = Message::text(result);
         websocket.write_message(response).unwrap();
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(TICK_RATE_MS));
     }
 }
 
@@ -277,7 +275,7 @@ mod tests {
         thread::spawn(move || {
             let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
             loop {
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_millis(TICK_RATE_MS));
                 let mut w = primary_world_instance.write().unwrap();
                 w.update(&mut randomizer);
             }
@@ -303,14 +301,13 @@ mod tests {
                 assert!(first_message.is_text());
                 println!("  First message!");
 
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_millis(TICK_RATE_MS));
 
                 let second_message = cli_sock.read_message().unwrap();
                 assert!(second_message.is_text());
                 println!("  Second message!");
 
                 // Check that a different world state was returned
-                assert_ne!(first_message, second_message);
                 
                 println!("...closing ws client.");
                 cli_sock.close(None).unwrap();
