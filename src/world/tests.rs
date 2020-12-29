@@ -18,6 +18,7 @@ fn test_food_spawner() {
     assert_eq!(world.entities.len(), 2);
 }
 
+// TODO: Private method, remove when fails
 #[test]
 fn test_eater_wander_goal() {
     let mut world = World::new(10, 10);
@@ -28,6 +29,8 @@ fn test_eater_wander_goal() {
     assert_eq!(EaterGoal::Wander, goal);
 }
 
+
+// TODO: Private method, remove when fails
 #[test]
 fn test_eater_food_goal() {
     let mut world = World::new(10, 10);
