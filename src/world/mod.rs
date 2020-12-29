@@ -42,7 +42,7 @@ impl World {
             }),
             Box::new(FoodSpawner {
                 last_spawned: 0,
-                spawn_every_x_ticks: 5,
+                spawn_every_x_ticks: 15,
             }),
             Box::new(Food {
                 position: Position { x: 20, y: 20 }
@@ -50,8 +50,8 @@ impl World {
         ];
 
         World{
-            width: 64,
-            height: 64,
+            width: 50,
+            height: 50,
             entities: entities,
         }
     }
@@ -67,14 +67,14 @@ impl World {
         positions
     }
 
-    fn get_food_entities(&self) -> Vec<&EntityType> {
-        let mut food_entities = vec![];
-        for entity in self.entities.iter() {
+    fn get_food_entities(&self) -> Vec<usize> {
+        let mut food_entity_indices = vec![];
+        for (i, entity) in self.entities.iter().enumerate() {
             if entity.get_tag() == "food" {
-                food_entities.push(entity);
+                food_entity_indices.push(i);
             }
         }
-        food_entities
+        food_entity_indices
     }
 
     #[allow(dead_code)]
@@ -147,14 +147,31 @@ impl World {
     // TODO: Generalize randomizer
     pub fn update(&mut self, randomizer: &mut rand_pcg::Pcg32) {
         let mut spawned_entities = Vec::new();
+        let mut removed_entity_indices: Vec<usize> = Vec::new();
         for i in 0..self.entities.len() {
-            let (entity, spawned_entity) = self.entities[i].update(&self, randomizer);
+            
+            for j in removed_entity_indices.iter() {
+                if i == *j {
+                    continue;  // Entity has already been destroyed in this update cycle
+                }
+            }
+
+            let (entity, spawned_entity, removed_entity_index) = self.entities[i].update(&self, randomizer);
+
+            // Replace entity state with new state
             self.entities[i] = entity;
             if let Some(e) = spawned_entity {
                 spawned_entities.push(e);
             }
+            if let Some(i) = removed_entity_index {
+                removed_entity_indices.push(i)
+            }
         }
         self.entities.append(&mut spawned_entities);
+        for i in removed_entity_indices {
+            // Removing from the "middle" could end up very expensive
+            self.entities.remove(i);
+        }
     }
 
     pub fn render_to_string(&self) -> Vec<String>{
@@ -181,7 +198,7 @@ impl World {
 }
 
 trait Updateable {
-    fn update(&self, world: &World, rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>);
+    fn update(&self, world: &World, rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>);
     fn get_position(&self) -> &Position;
     fn get_tag(&self) -> &str { "untagged" }
 }
@@ -197,17 +214,17 @@ struct FoodSpawner {
 }
 
 impl Updateable for FoodSpawner {
-    fn update(&self, world: &World, rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>) {
+    fn update(&self, world: &World, rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>) {
         let mut new_spawner = self.clone();
         if self.last_spawned + 1 >= self.spawn_every_x_ticks {
             let x = rng.gen_range(0..world.width);
             let y = rng.gen_range(0..world.height);
             new_spawner.last_spawned = 0;
             let new_food = Food::new(Position{ x, y });
-            (Box::new(new_spawner), Some(Box::new(new_food)))
+            (Box::new(new_spawner), Some(Box::new(new_food)), None)
         } else {
             new_spawner.last_spawned += 1;
-            (Box::new(new_spawner), None)
+            (Box::new(new_spawner), None, None)
         }
     }
 
@@ -222,9 +239,9 @@ struct Food {
 }
 
 impl Updateable for Food {
-    fn update(&self, _world: &World, _rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>) { 
+    fn update(&self, _world: &World, _rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>) { 
         let new_food = self.clone();
-        (Box::new(new_food), None)
+        (Box::new(new_food), None, None)
     }
     
     fn get_position(&self) -> &Position { &self.position }
@@ -244,35 +261,53 @@ struct Eater {
     position: Position
 }
 
+enum EaterGoal {
+    GetFood(usize),
+    Wander,
+    DoNothing,
+}
+
 impl Updateable for Eater {
-    fn update(&self, world: &World, _rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>) {
+    fn update(&self, world: &World, _rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>) {
         let mut new_eater = self.clone();
+        let mut removed_entity_index = None;
+        
         let goal = self.select_goal(world);
-        if let Some(next_position) = self.pathfind(goal, world) {
-            new_eater.position = next_position;
+        match goal {
+            EaterGoal::DoNothing => {},
+            EaterGoal::Wander => {},
+            EaterGoal::GetFood(i) => {
+                let food_entity = &world.entities[i];
+                let (cost, next_position) = self.pathfind(food_entity.get_position(), world);
+                if cost == 1 {
+                    removed_entity_index = Some(i);
+                } else {
+                    new_eater.position = next_position;
+                }
+            }
         }
-        (Box::new(new_eater), None)
+        (Box::new(new_eater), None, removed_entity_index)
     }
     
     fn get_position(&self) -> &Position { &self.position }
 }
 
 impl Eater {
-    fn select_goal(&self, world: &World) -> Position {
+    fn select_goal(&self, world: &World) -> EaterGoal {
         let entities = self.get_line_of_sight_entities(world);
         if entities.len() == 0 {
-            self.position.clone()
+            EaterGoal::DoNothing
         } else {
-            entities[0].get_position().clone()
+            EaterGoal::GetFood(entities[0])
         }
     }
 
-    fn get_line_of_sight_entities<'a>(&self, world: &'a World) -> Vec<&'a EntityType>{
+    fn get_line_of_sight_entities<'a>(&self, world: &'a World) -> Vec<usize>{
         // Omniscient
         world.get_food_entities()
     }
 
-    fn pathfind(&self, goal: Position, world: &World) -> Option<Position> {
+    fn pathfind(&self, goal: &Position, world: &World) -> (usize, Position) {
        pathfinding::a_star_pathfind(&self.position, goal, world)
     }
 }

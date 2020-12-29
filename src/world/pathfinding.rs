@@ -33,21 +33,19 @@ fn graph_from_world(world: &World) -> UnGraphMap<(u8, u8), ()> {
     g
 }
 
-pub fn a_star_pathfind(cur_pos: &Position, goal: Position, world: &World) -> Option<Position> {
+pub fn a_star_pathfind(cur_pos: &Position, goal: &Position, world: &World) -> (usize, Position) {
     let mut graph = graph_from_world(world);
     let a = graph.add_node((cur_pos.x, cur_pos.y));
     let f = graph.add_node((goal.x, goal.y));
     // TODO: Fix final param which should be manhattan distance heuristic
     if let Some(result) = astar(&graph, a, |finish| finish == f, |_| 1, |_| 0) {
-        let (_, path) = result;
-    // This is the arrival state, the first and only node is the goal node
-        if path.len() == 1 { 
-            None
-        } else {
-            Some(Position { x: path[1].0, y: path[1].1 })
+        let (cost, path) = result;
+        if cost == 0 {
+            panic!("Called for pathfinding but already on goal square");
         }
+        (cost, Position { x: path[1].0, y: path[1].1 })
     } else {
-        panic!("Goal is unreachable!")
+        panic!("Goal is unreachable!");
     }
 }
 
