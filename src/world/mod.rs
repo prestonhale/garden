@@ -38,6 +38,13 @@ impl Distribution<Direction> for Standard{
     }
 }
 
+#[derive(Serialize)]
+pub struct RenderedEntity<'a> {
+    // console renderer directly accesses these fields
+    pub position: &'a Position,
+    pub color: &'a str,
+}
+
 type EntityType = Box<dyn Updateable + Sync + Send>;
 
 impl World {
@@ -70,12 +77,15 @@ impl World {
         self.entities.push(entity);
     }
 
-    pub fn get_cells(&self) -> Vec<&Position> { 
-        let mut positions = vec![];
+    pub fn render(&self) -> Vec<RenderedEntity> { 
+        let mut rendered_entities = vec![];
         for entity in self.entities.iter() {
-            positions.push(entity.get_position());
+            rendered_entities.push(RenderedEntity{
+                position: entity.get_position(),
+                color: entity.get_color(),
+            });
         }
-        positions
+        rendered_entities
     }
 
     fn get_food_entities(&self) -> Vec<usize> {
@@ -207,10 +217,16 @@ impl World {
 
 }
 
+pub const RED: &str = "#ff0000";
+pub const BROWN: &str = "#996600";
+pub const BLACK: &str = "#000000";
+pub const GREEN: &str = "#009933";
+
 pub trait Updateable {
     fn update(&self, world: &World, rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>);
     fn get_position(&self) -> &Position;
     fn get_tag(&self) -> &str { "untagged" }
+    fn get_color(&self) -> &str;
 }
 
 trait Spawner {
@@ -241,6 +257,8 @@ mod food_spawner {
             }
         }
 
+        fn get_color(&self) -> &str {GREEN} // Hack to make appear invisible
+
         fn get_position(&self) -> &Position { 
             &Position{ x:0, y: 0}
         }
@@ -253,6 +271,24 @@ mod food_spawner {
                 spawn_every_x_ticks
             }
         }
+    }
+
+    #[test]
+    fn test_food_spawner() {
+        let entities: Vec<EntityType> = vec![
+            Box::new(food_spawner::FoodSpawner{
+                last_spawned: 9,
+                spawn_every_x_ticks: 10
+            })
+        ];
+        let mut world = World::new(
+            10,
+            10,
+        );
+        world.entities = entities;
+        let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
+        world.update(&mut randomizer);
+        assert_eq!(world.entities.len(), 2);
     }
 }
 
@@ -270,6 +306,8 @@ mod food {
         }
         
         fn get_position(&self) -> &Position { &self.position }
+
+        fn get_color(&self) -> &str {RED}
         
         fn get_tag(&self) -> &str { "food" }
     }
@@ -338,6 +376,7 @@ mod eater {
             (Box::new(new_eater), None, removed_entity_index)
         }
         
+        fn get_color(&self) -> &str {BROWN}
         fn get_position(&self) -> &Position { &self.position }
     }
 
@@ -403,6 +442,28 @@ mod eater {
         fn pathfind(&self, goal: &Position, world: &World) -> (usize, Position) {
         pathfinding::a_star_pathfind(&self.position, goal, world)
         }
+    }
+
+    #[test]
+    fn test_eater_wander_goal() {
+        let mut world = World::new(10, 10);
+        let food = Box::new(food::Food::new(Position { x: 0, y: 0 }));
+        world.add_entity(food);
+        let eater = Eater::new();
+        let goal = eater.select_goal(&world);
+        assert_eq!(EaterGoal::Wander, goal);
+    }
+
+    // TODO: Private method, remove when fails
+    #[test]
+    fn test_eater_food_goal() {
+        let mut world = World::new(10, 10);
+        let food = Box::new(food::Food::new(Position { x: 0, y: 0 }));
+        world.add_entity(food);
+        let mut eater = Eater::new();
+        eater.set_desire(Desire::Hunger, 51);
+        let goal = eater.select_goal(&world);
+        assert_eq!(eater::EaterGoal::GetFood(0), goal);
     }
 }
 

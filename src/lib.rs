@@ -15,7 +15,7 @@ use tungstenite::server::accept;
 
 // Console renderer
 use askama::Template;
-use console::Term;
+use console::{Term, Style, Color};
 
 mod thread_pool;
 mod world;
@@ -57,16 +57,27 @@ pub fn run(config: Config) {
         loop {
             let term = Term::stdout();
             let world = world_instance.read().unwrap();
-            let lines = world.render_to_string();
+            let rendered_entities = world.render();
             match term.clear_screen() {
                 Ok(_) => (),
                 _ => panic!("Failed to clear screen"),
             };
-            for line in &lines {
-                match term.write_line(line) {
-                    Ok(_) => (),
-                    _ => panic!("Failed to clear screen"),
-                };
+            for y in 0..*world.get_height() {
+                for x in 0..*world.get_width(){
+                    let mut style = Style::new().bg(Color::Green);  // default background color
+                    for entity in rendered_entities.iter() {
+                        if entity.position.x == x && entity.position.y == y {
+                            style = match entity.color {
+                                world::RED => style.bg(Color::Red),
+                                world::BROWN => style.bg(Color::Yellow),
+                                world::BLACK => style.bg(Color::Black),
+                                _ => style.bg(Color::Magenta) // Magenta, the color of "oh no"
+                            };
+                        }
+                    }
+                    print!("{}", style.apply_to("  "))
+                }
+                println!("")
             }
             thread::sleep(Duration::from_millis(TICK_RATE_MS));
         }
@@ -136,9 +147,9 @@ fn handle_index(mut stream: &TcpStream, address_ref: &str, world_ref: &Arc<RwLoc
 fn handle_world_status(mut stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
     let status_line = "HTTP/1.1 200 OK\r\n\r\n";
     let w = &world_ref.read().unwrap();
-    let player = w.get_cells();
+    let rendered_entities = w.render();
     let response;
-    match serde_json::to_string(&player) {
+    match serde_json::to_string(&rendered_entities) {
         Ok(serialized_player) => response = format!("{}{}", status_line, serialized_player),
         _ => panic!("Unable to serialize player"),
     };
@@ -198,9 +209,9 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
             }
         };
         let w = world_ref.read().unwrap();
-        let player = w.get_cells();
+        let rendered_entities = w.render();
         let result;
-        match serde_json::to_string(&player) {
+        match serde_json::to_string(&rendered_entities) {
             Ok(serialized_player) => result = format!("{}", serialized_player),
             _ => panic!("Unable to serialize player"),
         };

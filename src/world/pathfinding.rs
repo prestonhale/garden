@@ -47,6 +47,7 @@ pub fn a_star_pathfind(cur_pos: &Position, goal: &Position, world: &World) -> (u
     if let Some(result) = astar(&graph, a, |finish| finish == f, edge_cost_one, manhattan_distance_heuristic) {
         let (cost, path) = result;
         if cost == 0 {
+            // WARNING: Potential panic if entities ever spawn on top of each other
             panic!("Called for pathfinding but already on goal square");
         }
         (cost as usize, Position { x: path[1].0, y: path[1].1 })

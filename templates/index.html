@@ -22,9 +22,7 @@
     <canvas id="game-canvas"></canvas>
     <script>
       const CELL_SIZE = 5;
-      const GRID_COLOR = "#CCCCCC";
-      const ACTIVE_COLOR = "#000000";
-      const INACTIVE_COLOR = "#FFFFFF";
+      const GREEN = "#009933";
       const WIDTH = {{ width }};
       const HEIGHT = {{ height }};
 
@@ -36,7 +34,7 @@
 
       const drawGrid = () => {
           ctx.beginPath();
-          ctx.strokeStyle = GRID_COLOR;
+          ctx.strokeStyle = GREEN;
 
           // Vertical Lines
           for (let i = 0; i <= WIDTH; i ++) {
@@ -56,7 +54,7 @@
       const drawCells = (cells) => {
         for (let x = 0; x <= WIDTH; x++) {
           for (let y =0; y <= HEIGHT; y++) {
-            ctx.fillStyle = INACTIVE_COLOR;
+            ctx.fillStyle = GREEN;
             ctx.fillRect(
               y * (CELL_SIZE + 1) + 1,
               x * (CELL_SIZE + 1) + 1,
@@ -66,10 +64,10 @@
           }
         }
         for (let i = 0; i < cells.length; i++) {
-          ctx.fillStyle = ACTIVE_COLOR;
+          ctx.fillStyle = cells[i].color;
           ctx.fillRect(
-            cells[i].y * (CELL_SIZE + 1) + 1,
-            cells[i].x * (CELL_SIZE + 1) + 1,
+            cells[i].position.y * (CELL_SIZE + 1) + 1,
+            cells[i].position.x * (CELL_SIZE + 1) + 1,
             CELL_SIZE,
             CELL_SIZE
           );
