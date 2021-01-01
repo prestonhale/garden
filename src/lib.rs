@@ -6,7 +6,7 @@ use std::str;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rand_core::SeedableRng;
 
@@ -18,7 +18,7 @@ use askama::Template;
 use console::{Term, Style, Color};
 
 mod thread_pool;
-mod world;
+pub mod world;
 
 const TICK_RATE_MS: u64 = 100;
 
@@ -40,14 +40,30 @@ pub fn run(config: Config) {
     let primary_world_instance = Arc::clone(&world_ref_counter);
     thread::spawn(move || {
         let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
+        let mut start;
+        let mut frame_time;
         loop {
-            // TODO: Fix timescale
-            thread::sleep(Duration::from_millis(TICK_RATE_MS));
+            start = Instant::now();
+
             // A possible optimization: Have world calculate its value without
             // getting a lock. Only lock when updating the value. Would need to
             // test how often the lock is preventing reads.
-            let mut w = primary_world_instance.write().unwrap();
-            w.update(&mut randomizer);
+
+            // This scope is created to ensure the lock is dropped ASAP
+            {
+                let mut w = primary_world_instance.write().unwrap();
+                let lock_time = start.elapsed().as_millis();
+                w.update(&mut randomizer);
+            }
+            frame_time = start.elapsed().as_millis() as u64;
+
+            // println!("Frame processing took: {}; lock time {}", frame_time, lock_time);
+            if frame_time > TICK_RATE_MS {
+                // println!("WARNING: Frame processing ({}) took longer than tick rate ({})", frame_time, TICK_RATE_MS);
+                frame_time = TICK_RATE_MS; // Prevent subtraction below from going negative
+            }
+
+            thread::sleep(Duration::from_millis(TICK_RATE_MS - frame_time));
         }
     });
 
@@ -181,8 +197,11 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
     let mut websocket = accept(stream).unwrap();
     websocket.get_mut().set_nodelay(true).unwrap(); // Disables Nagle's Algorithm, reduces stream delays
     websocket.get_mut().set_nonblocking(true).unwrap();
-
+    
+    let mut start_time;
+    let mut socket_loop_time;
     loop {
+        start_time = Instant::now();
         match websocket.read_message() {
             Ok(msg) if msg.is_close() => {
                 if let Err(e) = websocket.close(None) {
@@ -208,15 +227,19 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
                 }
             }
         };
-        let w = world_ref.read().unwrap();
-        let rendered_entities = w.render();
         let result;
-        match serde_json::to_string(&rendered_entities) {
+        let w = world_ref.read().unwrap();
+        // TODO: Re-rendering the entites for every open websocket is unecessary
+        match serde_json::to_string(&w.render()) {
             Ok(serialized_player) => result = format!("{}", serialized_player),
             _ => panic!("Unable to serialize player"),
         };
         let response = Message::text(result);
         websocket.write_message(response).unwrap();
+
+        socket_loop_time = start_time.elapsed().as_millis();
+        println!("Socket loop took: {}", socket_loop_time);
+
         thread::sleep(Duration::from_millis(TICK_RATE_MS));
     }
 }

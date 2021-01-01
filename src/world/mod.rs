@@ -5,7 +5,7 @@ use rand::distributions::{Distribution, Standard};
 
 use serde::{Serialize, Deserialize};
 
-mod pathfinding;
+mod garden_pathfinding;
 
 pub struct World{
     pub width: i32,
@@ -14,7 +14,7 @@ pub struct World{
     entities: Vec<EntityType>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone, Hash)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -63,11 +63,15 @@ impl World {
             Box::new(food::Food::new(Position { x: 20, y: 20 })),
         ];
 
+        let width = 30;
+        let height = 30;
+
         World{
-            width: 30,
-            height: 30,
+            width: width,
+            height: height,
             entities: entities,
         }
+        
     }
 
     pub fn get_height(&self) -> &i32 { &self.height}
@@ -294,6 +298,7 @@ mod food_spawner {
 
 mod food {
     use super::*;
+
     #[derive(Clone, Copy)]
     pub struct Food {
         position: Position
@@ -314,7 +319,6 @@ mod food {
 
     impl Food {
         pub fn new(position: Position) -> Food {
-            println!("Spawning food at {:?}", position);
             Food { position: position }
         }
     }
@@ -439,8 +443,8 @@ mod eater {
             world.get_food_entities()
         }
 
-        fn pathfind(&self, goal: &Position, world: &World) -> (usize, Position) {
-        pathfinding::a_star_pathfind(&self.position, goal, world)
+        fn pathfind(&self, goal: &Position, world: &World) -> (i32, Position) {
+            garden_pathfinding::a_star_pathfind(&self.position, goal, world)
         }
     }
 
@@ -466,6 +470,3 @@ mod eater {
         assert_eq!(eater::EaterGoal::GetFood(0), goal);
     }
 }
-
-#[cfg(test)]
-mod tests;
