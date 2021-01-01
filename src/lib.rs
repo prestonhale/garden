@@ -238,7 +238,7 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
         websocket.write_message(response).unwrap();
 
         socket_loop_time = start_time.elapsed().as_millis();
-        println!("Socket loop took: {}", socket_loop_time);
+        // println!("Socket loop took: {}", socket_loop_time);
 
         thread::sleep(Duration::from_millis(TICK_RATE_MS));
     }
