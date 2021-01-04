@@ -42,6 +42,7 @@ pub fn run(config: Config) {
         let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
         let mut start;
         let mut frame_time;
+        let mut lock_time;
         loop {
             start = Instant::now();
 
@@ -52,14 +53,14 @@ pub fn run(config: Config) {
             // This scope is created to ensure the lock is dropped ASAP
             {
                 let mut w = primary_world_instance.write().unwrap();
-                let lock_time = start.elapsed().as_millis();
+                lock_time = start.elapsed().as_millis();
                 w.update(&mut randomizer);
             }
             frame_time = start.elapsed().as_millis() as u64;
 
-            // println!("Frame processing took: {}; lock time {}", frame_time, lock_time);
+            println!("Frame processing took: {}; lock time {}", frame_time, lock_time);
             if frame_time > TICK_RATE_MS {
-                // println!("WARNING: Frame processing ({}) took longer than tick rate ({})", frame_time, TICK_RATE_MS);
+                println!("WARNING: Frame processing ({}) took longer than tick rate ({})", frame_time, TICK_RATE_MS);
                 frame_time = TICK_RATE_MS; // Prevent subtraction below from going negative
             }
 
@@ -72,18 +73,27 @@ pub fn run(config: Config) {
         let world_instance = Arc::clone(&world_ref_counter);
         loop {
             let term = Term::stdout();
-            let world = world_instance.read().unwrap();
-            let rendered_entities = world.render();
+            // Scope allows us to rapidly release world lock
+            let world_height;
+            let world_width;
+            let rendered_entities;
+            {
+                let world = world_instance.read().unwrap();
+                rendered_entities = world.render();
+                world_height = *world.get_height(); // could be cached
+                world_width = *world.get_height(); // could be cached
+            }
+            
             match term.clear_screen() {
                 Ok(_) => (),
                 _ => panic!("Failed to clear screen"),
             };
-            for y in 0..*world.get_height() {
-                for x in 0..*world.get_width(){
+            for y in 0..world_height {
+                for x in 0..world_width{
                     let mut style = Style::new().bg(Color::Green);  // default background color
                     for entity in rendered_entities.iter() {
                         if entity.position.x == x && entity.position.y == y {
-                            style = match entity.color {
+                            style = match &entity.color[..] {
                                 world::RED => style.bg(Color::Red),
                                 world::BROWN => style.bg(Color::Yellow),
                                 world::BLACK => style.bg(Color::Black),
@@ -228,9 +238,14 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
             }
         };
         let result;
-        let w = world_ref.read().unwrap();
+        let rendered_entities;
+        // Scope reduces time the world lock is held
+        {
+            let w = world_ref.read().unwrap();
+            rendered_entities = w.render();
+        }
         // TODO: Re-rendering the entites for every open websocket is unecessary
-        match serde_json::to_string(&w.render()) {
+        match serde_json::to_string(&rendered_entities) {
             Ok(serialized_player) => result = format!("{}", serialized_player),
             _ => panic!("Unable to serialize player"),
         };

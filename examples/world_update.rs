@@ -10,7 +10,7 @@ use rand_core::SeedableRng;
 fn main() {
     let mut my_world = world::World::default();
     let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
-    for _ in 0..100 {
+    for _ in 0..1000 {
         my_world.update(&mut randomizer);
     };
 }

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use rand::prelude::*;
 use rand::distributions::{Distribution, Standard};
@@ -39,10 +40,10 @@ impl Distribution<Direction> for Standard{
 }
 
 #[derive(Serialize)]
-pub struct RenderedEntity<'a> {
+pub struct RenderedEntity {
     // console renderer directly accesses these fields
-    pub position: &'a Position,
-    pub color: &'a str,
+    pub position: Position,
+    pub color: String,
 }
 
 type EntityType = Box<dyn Updateable + Sync + Send>;
@@ -82,13 +83,16 @@ impl World {
     }
 
     pub fn render(&self) -> Vec<RenderedEntity> { 
+        let start = Instant::now();
         let mut rendered_entities = vec![];
         for entity in self.entities.iter() {
             rendered_entities.push(RenderedEntity{
-                position: entity.get_position(),
-                color: entity.get_color(),
+                position: *entity.get_position(),
+                color: String::from(entity.get_color()),
             });
         }
+        let render_time = start.elapsed().as_millis() as u64;
+        println!("\tRendering world: {}", render_time);
         rendered_entities
     }
 
@@ -368,7 +372,11 @@ mod eater {
                 },
                 EaterGoal::GetFood(i) => {
                     let food_entity = &world.entities[i];
+                    let start = Instant::now();
                     let (cost, next_position) = self.pathfind(food_entity.get_position(), world);
+                    let pathfind_time = start.elapsed().as_millis() as u64;
+
+                    println!("\tPathfinding processing took: {}", pathfind_time);
                     if cost == 1 { // Eater is adjacent to food
                         removed_entity_index = Some(i);
                         new_eater.increment_desire(Desire::Hunger, -20);
@@ -427,13 +435,21 @@ mod eater {
 
         fn select_goal(&self, world: &World) -> EaterGoal {
             let goal: EaterGoal;
-            let entities = self.get_line_of_sight_entities(world);
-            if self.get_desire(Desire::Hunger) > self.get_desire_threshold(Desire::Hunger) 
-                && entities.len() > 0
-            {
-                goal = EaterGoal::GetFood(entities[0])
+            let entity_indices = self.get_line_of_sight_entities(world);
+            if self.get_desire(Desire::Hunger) < self.get_desire_threshold(Desire::Hunger) || entity_indices.len() == 0 {
+                goal = EaterGoal::Wander
             } else {
-                goal = EaterGoal::Wander;
+                let mut  closest_idx = 0;
+                let mut min_distance = 99999999;
+                for entity_idx in entity_indices {
+                    let entity_position = world.entities[entity_idx].get_position();
+                    let distance = (entity_position.x - self.position.x).abs() + (entity_position.y - self.position.y).abs();
+                    if distance < min_distance {
+                        closest_idx = entity_idx;
+                        min_distance = distance;
+                    }
+                }
+                goal = EaterGoal::GetFood(closest_idx)
             }
             goal
         }
