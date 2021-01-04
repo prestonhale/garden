@@ -13,6 +13,7 @@ pub struct World{
     pub height: i32,
     // Sync and Send are required to ensure entities are thread-safe
     entities: Vec<EntityType>,
+    removed_entity_indices: Vec<usize>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone, Hash)]
@@ -54,13 +55,14 @@ impl World {
             height: height,
             width: width,
             entities: vec![],
+            removed_entity_indices: vec![],
         }
     }
 
     pub fn default() -> World {
         let entities: Vec<EntityType> = vec![
             Box::new(eater::Eater::new()),
-            Box::new(food_spawner::FoodSpawner::new(0, 20)),
+            Box::new(food_spawner::FoodSpawner::new(0, 10)),
             Box::new(food::Food::new(Position { x: 20, y: 20 })),
         ];
 
@@ -71,6 +73,7 @@ impl World {
             width: width,
             height: height,
             entities: entities,
+            removed_entity_indices: vec![]
         }
         
     }
@@ -99,6 +102,9 @@ impl World {
     fn get_food_entities(&self) -> Vec<usize> {
         let mut food_entity_indices = vec![];
         for (i, entity) in self.entities.iter().enumerate() {
+            if self.removed_entity_indices.iter().any(|j| *j == i) { // entity has been destroyed
+                continue;
+            }
             if entity.get_tag() == "food" {
                 food_entity_indices.push(i);
             }
@@ -175,13 +181,11 @@ impl World {
     // TODO: Generalize randomizer
     pub fn update(&mut self, randomizer: &mut rand_pcg::Pcg32) {
         let mut spawned_entities = Vec::new();
-        let mut removed_entity_indices: Vec<usize> = Vec::new();
         for i in 0..self.entities.len() {
             
-            for j in removed_entity_indices.iter() {
-                if i == *j {
-                    continue;  // Entity has already been destroyed in this update cycle
-                }
+            // May be worth maintaining a separate iterable of "active objects"
+            if self.removed_entity_indices.iter().any(|j| *j == i) { // entity has been destroyed
+                continue;
             }
 
             let (entity, spawned_entity, removed_entity_index) = self.entities[i].update(&self, randomizer);
@@ -192,14 +196,19 @@ impl World {
                 spawned_entities.push(e);
             }
             if let Some(i) = removed_entity_index {
-                removed_entity_indices.push(i)
+                self.removed_entity_indices.push(i)
             }
         }
-        self.entities.append(&mut spawned_entities);
-        for i in removed_entity_indices {
-            // Removing from the "middle" could end up very expensive
-            self.entities.remove(i);
+        for i in self.removed_entity_indices.iter() {
+            // WARNING: The indices in removed_entity_indices MUST BE ORDERED
+            // for this to work. Because they are added in a loop above they 
+            // ARE ORDERED right now. If you change something with that loop, 
+            // this will catastrophically break.
+            self.entities.swap_remove(*i as usize);
         }
+        self.removed_entity_indices.clear();
+        
+        self.entities.append(&mut spawned_entities);
     }
 
     pub fn render_to_string(&self) -> Vec<String>{
@@ -343,25 +352,27 @@ mod eater {
         position: Position,
         desires: HashMap<Desire, i8>,
         desire_threshold: HashMap<Desire, i8>,
+        age: i32,
+        last_reproduced: i32,
     }
 
     #[derive(Debug, PartialEq)]
     enum EaterGoal {
         GetFood(usize), // Approach or consume food entity
         Wander, // Move randomly
+        Die,
+        Reproduce,
     }
 
     impl Updateable for Eater {
         fn update(&self, world: &World, rand_gen: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>) {
             let mut new_eater = self.clone();
-            let mut removed_entity_index = None;
+            let new_hunger = new_eater.increment_desire(Desire::Hunger, 1);
+            new_eater.age += 1;
+            new_eater.last_reproduced += 1;
             
-            let new_desire = new_eater.increment_desire(Desire::Hunger, 1);
-            if new_desire > 99 {
-                // TODO: Starve
-                // Normally we'd starve here, temporarily clamp to 0-99
-                new_eater.increment_desire(Desire::Hunger, -1);
-            }
+            let mut removed_entity_index = None;
+            let mut offspring: Option<EntityType> = None;
 
             let goal = self.select_goal(world);
             match goal {
@@ -383,9 +394,21 @@ mod eater {
                     } else {
                         new_eater.position = next_position;
                     }
+                },
+                EaterGoal::Die => {
+                    let self_idx = world.entities.iter().position(
+                        |cur_entity| *cur_entity.get_position() == self.position
+                    ).expect("entity not found in world vector of entities");
+                    removed_entity_index = Some(self_idx);
+                },
+                EaterGoal::Reproduce => {
+                    let mut child = Box::new(Eater::new());
+                    child.position = Position{x: self.position.x, y: self.position.y};
+                    offspring = Some(child);
+                    new_eater.last_reproduced = 0;
                 }
             }
-            (Box::new(new_eater), None, removed_entity_index)
+            (Box::new(new_eater), offspring, removed_entity_index)
         }
         
         fn get_color(&self) -> &str {BROWN}
@@ -404,6 +427,8 @@ mod eater {
                 position: Position{ x:0, y:0 },
                 desires: desires,
                 desire_threshold: desire_threshold,
+                age: 0,
+                last_reproduced: 0,
             }
         }
 
@@ -436,7 +461,14 @@ mod eater {
         fn select_goal(&self, world: &World) -> EaterGoal {
             let goal: EaterGoal;
             let entity_indices = self.get_line_of_sight_entities(world);
-            if self.get_desire(Desire::Hunger) < self.get_desire_threshold(Desire::Hunger) || entity_indices.len() == 0 {
+            let cur_hunger = self.get_desire(Desire::Hunger);
+            let hunger_threshold = self.get_desire_threshold(Desire::Hunger);
+
+            if cur_hunger > 99 || self.age > 1000 {
+                goal = EaterGoal::Die
+            } else if cur_hunger < 20 && self.age > 40 && self.last_reproduced > 40 {
+                goal = EaterGoal::Reproduce
+            } else if cur_hunger < hunger_threshold || entity_indices.len() == 0 {
                 goal = EaterGoal::Wander
             } else {
                 let mut  closest_idx = 0;
