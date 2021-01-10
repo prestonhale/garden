@@ -21,7 +21,7 @@
     <div id="output"></div>
     <canvas id="game-canvas"></canvas>
     <script>
-      const CELL_SIZE = 5;
+      const CELL_SIZE = 15;
       const GREEN = "#009933";
       const WIDTH = {{ width }};
       const HEIGHT = {{ height }};
@@ -76,9 +76,10 @@
       
       const render = (cells) => {
         drawGrid();
-        console.log(cells);
+        // console.log(cells);
         drawCells(cells);
       };
+
 
       function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));

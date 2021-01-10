@@ -42,7 +42,7 @@ pub fn run(config: Config) {
         let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
         let mut start;
         let mut frame_time;
-        let mut lock_time;
+        // let mut lock_time;
         loop {
             start = Instant::now();
 
@@ -53,12 +53,12 @@ pub fn run(config: Config) {
             // This scope is created to ensure the lock is dropped ASAP
             {
                 let mut w = primary_world_instance.write().unwrap();
-                lock_time = start.elapsed().as_millis();
+                // lock_time = start.elapsed().as_millis();
                 w.update(&mut randomizer);
             }
             frame_time = start.elapsed().as_millis() as u64;
 
-            println!("Frame processing took: {}; lock time {}", frame_time, lock_time);
+            // println!("Frame processing took: {}; lock time {}", frame_time, lock_time);
             if frame_time > TICK_RATE_MS {
                 println!("WARNING: Frame processing ({}) took longer than tick rate ({})", frame_time, TICK_RATE_MS);
                 frame_time = TICK_RATE_MS; // Prevent subtraction below from going negative
@@ -208,10 +208,10 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
     websocket.get_mut().set_nodelay(true).unwrap(); // Disables Nagle's Algorithm, reduces stream delays
     websocket.get_mut().set_nonblocking(true).unwrap();
     
-    let mut start_time;
-    let mut socket_loop_time;
+    // let mut start_time;
+    // let mut socket_loop_time;
     loop {
-        start_time = Instant::now();
+        // start_time = Instant::now();
         match websocket.read_message() {
             Ok(msg) if msg.is_close() => {
                 if let Err(e) = websocket.close(None) {
@@ -252,7 +252,7 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
         let response = Message::text(result);
         websocket.write_message(response).unwrap();
 
-        socket_loop_time = start_time.elapsed().as_millis();
+        // socket_loop_time = start_time.elapsed().as_millis();
         // println!("Socket loop took: {}", socket_loop_time);
 
         thread::sleep(Duration::from_millis(TICK_RATE_MS));

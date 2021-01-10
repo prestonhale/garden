@@ -1,7 +1,9 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 
 use rand::prelude::*;
+use rand::Rng;
+use rand::seq::SliceRandom;
 use rand::distributions::{Distribution, Standard};
 
 use serde::{Serialize, Deserialize};
@@ -22,12 +24,20 @@ pub struct Position {
     pub y: i32,
 }
 
+#[derive(Copy, Clone)]
 pub enum Direction {
-    Up,
-    Right,
-    Down,
-    Left
+    Up = 0,
+    Right = 1,
+    Down = 2,
+    Left = 3
 }
+
+static CARDINAL_DIRECTIONS: [Direction; 4] = [
+    Direction::Up, 
+    Direction::Right, 
+    Direction::Down, 
+    Direction::Left
+];
 
 impl Distribution<Direction> for Standard{
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Direction {
@@ -39,6 +49,7 @@ impl Distribution<Direction> for Standard{
         }
     }
 }
+
 
 #[derive(Serialize)]
 pub struct RenderedEntity {
@@ -95,7 +106,6 @@ impl World {
             });
         }
         let render_time = start.elapsed().as_millis() as u64;
-        println!("\tRendering world: {}", render_time);
         rendered_entities
     }
 
@@ -110,6 +120,19 @@ impl World {
             }
         }
         food_entity_indices
+    }
+
+    fn get_entity_at(&self, position: &Position) -> Option<&EntityType>{
+        for i in 0..self.entities.len() {
+            let entity_position = self.entities[i].get_position();
+            if self.removed_entity_indices.iter().any(|j| *j == i) { // entity has been destroyed
+                continue;
+            }
+            if *position == *entity_position {
+                return Some(&self.entities[i])
+            }
+        }
+        None
     }
 
     fn get_new_position(&self, cur_position: &Position, direction: &Direction) -> Position {
@@ -193,18 +216,19 @@ impl World {
             // Replace entity state with new state
             self.entities[i] = entity;
             if let Some(e) = spawned_entity {
+                // This needs to happen immediately, a push is safe
                 spawned_entities.push(e);
             }
             if let Some(i) = removed_entity_index {
                 self.removed_entity_indices.push(i)
             }
         }
-        for i in self.removed_entity_indices.iter() {
-            // WARNING: The indices in removed_entity_indices MUST BE ORDERED
-            // for this to work. Because they are added in a loop above they 
-            // ARE ORDERED right now. If you change something with that loop, 
-            // this will catastrophically break.
-            self.entities.swap_remove(*i as usize);
+        
+        // Must be ordered by descending in order for swap_remove to work
+        self.removed_entity_indices.sort();
+        self.removed_entity_indices.reverse();
+        for removal_index in self.removed_entity_indices.iter() {
+            self.entities.swap_remove(*removal_index as usize);
         }
         self.removed_entity_indices.clear();
         
@@ -241,6 +265,7 @@ pub const GREEN: &str = "#009933";
 
 pub trait Updateable {
     fn update(&self, world: &World, rng: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>);
+    fn get_name(&self) -> &str { "unnamed" }
     fn get_position(&self) -> &Position;
     fn get_tag(&self) -> &str { "untagged" }
     fn get_color(&self) -> &str;
@@ -367,7 +392,8 @@ mod eater {
     impl Updateable for Eater {
         fn update(&self, world: &World, rand_gen: &mut rand_pcg::Pcg32) -> (EntityType, Option<EntityType>, Option<usize>) {
             let mut new_eater = self.clone();
-            let new_hunger = new_eater.increment_desire(Desire::Hunger, 1);
+
+            new_eater.increment_desire(Desire::Hunger, 1);
             new_eater.age += 1;
             new_eater.last_reproduced += 1;
             
@@ -377,21 +403,45 @@ mod eater {
             let goal = self.select_goal(world);
             match goal {
                 EaterGoal::Wander => {
-                    let direction: Direction = rand_gen.sample(Standard);
-                    let next_position = world.get_new_position(&self.position, &direction);
+
+                    // Shuffle all positions
+                    // If the entity is surrounded, it won't move at all
+                    // I doubt this is much slower than choosing a single position but its worth profiling
+                    let mut move_attempts = CARDINAL_DIRECTIONS.clone();
+                    move_attempts.shuffle(rand_gen);
+                    let mut next_position = self.position;
+                    for i in 0..move_attempts.len() {
+                        next_position = world.get_new_position(&self.position, &move_attempts[i]);
+                        if let Some(_) = world.get_entity_at(&next_position) {
+                            continue
+                        }
+                    }
+
                     new_eater.position = next_position;
                 },
                 EaterGoal::GetFood(i) => {
                     let food_entity = &world.entities[i];
-                    let start = Instant::now();
-                    let (cost, next_position) = self.pathfind(food_entity.get_position(), world);
-                    let pathfind_time = start.elapsed().as_millis() as u64;
+                    // TODO: Cache path until its done or a collision is detected
+                    let mut ignored_positions = vec![];
+                    let pathfind_response = self.pathfind(food_entity.get_position(), ignored_positions, world);
+                    // TODO: Named tuples;
+                    let cost = pathfind_response.0;
+                    let mut next_position = pathfind_response.1;
 
-                    println!("\tPathfinding processing took: {}", pathfind_time);
                     if cost == 1 { // Eater is adjacent to food
                         removed_entity_index = Some(i);
+                        println!("Removing food at {}", i);
                         new_eater.increment_desire(Desire::Hunger, -20);
                     } else {
+                        while let Some(_) = world.get_entity_at(&next_position) {
+                            ignored_positions.push(next_position);
+                            if ignored_positions.len() == 4 {
+                                panic!("Entity at {:?} is surrounded", self.position);
+                            }
+                            let pathfind_response = self.pathfind(food_entity.get_position(), &ignored_positions, world);
+                            // TODO: Named tuples?
+                            next_position = pathfind_response.1;
+                        }
                         new_eater.position = next_position;
                     }
                 },
@@ -403,14 +453,28 @@ mod eater {
                 },
                 EaterGoal::Reproduce => {
                     let mut child = Box::new(Eater::new());
-                    child.position = Position{x: self.position.x, y: self.position.y};
-                    offspring = Some(child);
-                    new_eater.last_reproduced = 0;
+
+                    let mut move_attempts = CARDINAL_DIRECTIONS.clone();
+                    move_attempts.shuffle(rand_gen);
+                    let mut next_position = self.position;
+                    for i in 0..move_attempts.len() {
+                        next_position = world.get_new_position(&self.position, &move_attempts[i]);
+                        if let Some(_) = world.get_entity_at(&next_position) {
+                            continue
+                        }
+                    }
+
+                    // Only reproduce if there is an open adjacent square
+                    if next_position != self.position {
+                        child.position = next_position;
+                        offspring = Some(child);
+                        new_eater.last_reproduced = 0;
+                    }
                 }
             }
             (Box::new(new_eater), offspring, removed_entity_index)
         }
-        
+
         fn get_color(&self) -> &str {BROWN}
         fn get_position(&self) -> &Position { &self.position }
     }
@@ -491,8 +555,8 @@ mod eater {
             world.get_food_entities()
         }
 
-        fn pathfind(&self, goal: &Position, world: &World) -> (i32, Position) {
-            garden_pathfinding::a_star_pathfind(&self.position, goal, world)
+        fn pathfind(&self, goal: &Position, ignored_positions: &Vec<Position>, world: &World) -> (i32, Position) {
+            garden_pathfinding::a_star_pathfind(&self.position, goal, ignored_positions, world)
         }
     }
 
