@@ -21,6 +21,7 @@
     <div id="output"></div>
     <canvas id="game-canvas"></canvas>
     <button id="pause-button">⏸️</button>
+    <button id="update-button">>>️</button>
     <script>
       const CELL_SIZE = 15;
       const GREEN = "#009933";
@@ -85,7 +86,7 @@
 
       // Triggering pauses from multiple, different browsers will cause weird behavior
       // Just not worth syncing this up atm as it'll only ever be me debugging
-      const togglePause = (evt) => {
+      const togglePauseWorld = (evt) => {
         if (paused == false) {
           paused = true;
           document.getElementById("pause-button").innerHTML = "▶";
@@ -97,6 +98,10 @@
         }
       }
       
+      const updateWorld = (evt) => {
+        console.log("update");
+        doSend("update");
+      }
 
       function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -143,7 +148,8 @@
 
       window.addEventListener("load", update, false);
 
-      document.getElementById("pause-button").addEventListener("click", togglePause);
+      document.getElementById("pause-button").addEventListener("click", togglePauseWorld);
+      document.getElementById("update-button").addEventListener("click", updateWorld);
 
   </script>
   </body>

@@ -19,6 +19,7 @@ pub struct World {
     entities: Vec<EntityType>,
     removed_entity_indices: Vec<usize>,
     active: bool,
+    manual_update_requested: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone, Hash)]
@@ -81,6 +82,7 @@ impl World {
             entities: vec![],
             removed_entity_indices: vec![],
             active: true,
+            manual_update_requested: false,
         }
     }
 
@@ -101,6 +103,7 @@ impl World {
             entities: entities,
             removed_entity_indices: vec![],
             active: true,
+            manual_update_requested: false,
         }
     }
 
@@ -238,7 +241,14 @@ impl World {
     pub fn update_if_active(&mut self, randomizer: &mut rand_pcg::Pcg32){
         if self.active {
             self.update(randomizer);
+        } else if self.manual_update_requested {
+            self.manual_update_requested = false;
+            self.update(randomizer);
         }
+    }
+
+    pub fn request_manual_update(&mut self) {
+        self.manual_update_requested = true;
     }
 
     // TODO: Generalize randomizer

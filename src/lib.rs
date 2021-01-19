@@ -265,6 +265,7 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
 }
 
 fn handle_ws_text_msg(msg_string: &str, world_ref: &Arc<RwLock<world::World>>) {
+    println!("ws received: {}", msg_string);
     match msg_string{
         "pause" => {
             let mut w = world_ref.write().unwrap();
@@ -274,6 +275,10 @@ fn handle_ws_text_msg(msg_string: &str, world_ref: &Arc<RwLock<world::World>>) {
             let mut w = world_ref.write().unwrap();
             w.unpause();
         },
+        "update" => {
+            let mut w = world_ref.write().unwrap();
+            w.request_manual_update();
+        }
         _ => panic!("unknown websocket message received")
     }
 }
