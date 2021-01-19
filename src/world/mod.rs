@@ -18,6 +18,7 @@ pub struct World {
     // Sync and Send are required to ensure entities are thread-safe
     entities: Vec<EntityType>,
     removed_entity_indices: Vec<usize>,
+    active: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone, Hash)]
@@ -79,6 +80,7 @@ impl World {
             width: width,
             entities: vec![],
             removed_entity_indices: vec![],
+            active: true,
         }
     }
 
@@ -98,6 +100,7 @@ impl World {
             height: height,
             entities: entities,
             removed_entity_indices: vec![],
+            active: true,
         }
     }
 
@@ -232,6 +235,12 @@ impl World {
         new_position
     }
 
+    pub fn update_if_active(&mut self, randomizer: &mut rand_pcg::Pcg32){
+        if self.active {
+            self.update(randomizer);
+        }
+    }
+
     // TODO: Generalize randomizer
     pub fn update(&mut self, randomizer: &mut rand_pcg::Pcg32) {
         let mut spawned_entities = Vec::new();
@@ -263,6 +272,14 @@ impl World {
         }
         self.removed_entity_indices.clear();
         self.entities.append(&mut spawned_entities);
+    }
+
+    pub fn pause(&mut self) {
+        self.active = false;
+    }
+    
+    pub fn unpause(&mut self) {
+        self.active = true;
     }
 
     pub fn render_to_string(&self) -> Vec<String> {

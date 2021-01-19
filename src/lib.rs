@@ -35,7 +35,6 @@ impl Config {
 }
 
 pub fn run(config: Config) {
-    // TODO: The world is mutable in non-primary threads and should not be
     let world_ref_counter = Arc::new(RwLock::new(world::World::default()));
     let primary_world_instance = Arc::clone(&world_ref_counter);
     thread::spawn(move || {
@@ -54,7 +53,7 @@ pub fn run(config: Config) {
             {
                 let mut w = primary_world_instance.write().unwrap();
                 // lock_time = start.elapsed().as_millis();
-                w.update(&mut randomizer);
+                w.update_if_active(&mut randomizer);
             }
             frame_time = start.elapsed().as_millis() as u64;
 
@@ -213,20 +212,26 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
     loop {
         // start_time = Instant::now();
         match websocket.read_message() {
-            Ok(msg) if msg.is_close() => {
-                if let Err(e) = websocket.close(None) {
-                    if let tungstenite::Error::ConnectionClosed = e {
-                        return
-                    } else if let tungstenite::Error::Io(_) = e {
-                        return
-                    } else {
-                        panic!("Unexpected error closing websocket: {:?}", e)
-                    };
+            Ok(msg) => {
+                match msg {
+                    Message::Close(_) => {
+                        if let Err(e) = websocket.close(None) {
+                            if let tungstenite::Error::ConnectionClosed = e {
+                                return
+                            } else if let tungstenite::Error::Io(_) = e {
+                                return
+                            } else {
+                                panic!("Unexpected error closing websocket: {:?}", e)
+                            };
+                        }
+                        return;
+                    },
+                    Message::Text(msg_string) => {
+                        handle_ws_text_msg(&msg_string[..], world_ref);
+                    },
+                    _ => panic!("received unrecognized type of websocket message")
                 }
-                return;
             },
-            // The client shouldn't send anything besides close to the websocket
-            Ok(_) => (),
             Err(e) => {
                 match e {
                     tungstenite::Error::ConnectionClosed => return,
@@ -256,6 +261,20 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
         // println!("Socket loop took: {}", socket_loop_time);
 
         thread::sleep(Duration::from_millis(TICK_RATE_MS));
+    }
+}
+
+fn handle_ws_text_msg(msg_string: &str, world_ref: &Arc<RwLock<world::World>>) {
+    match msg_string{
+        "pause" => {
+            let mut w = world_ref.write().unwrap();
+            w.pause();
+        },
+        "unpause" => {
+            let mut w = world_ref.write().unwrap();
+            w.unpause();
+        },
+        _ => panic!("unknown websocket message received")
     }
 }
 
