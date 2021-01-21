@@ -15,7 +15,6 @@ use pretty_env_logger;
 use tungstenite::protocol::Message;
 use tungstenite::server::accept;
 
-// Console renderer
 use askama::Template;
 
 mod thread_pool;
@@ -113,11 +112,14 @@ pub fn start_tcp_server(world_ref_counter: &Arc<RwLock<ConfiguredWorld>>, config
 
         pool.execute(move || {
             let index = b"GET / HTTP/1.1\r\n";
+            let debug_index = b"GET /?debug=9933212 HTTP/1.1\r\n";
             let world_status = b"GET /world_status HTTP/1.1\r\n";
             let websocket = b"GET /websocket";
 
             if buffer.starts_with(index) {
                 handle_index(&stream, &address_ref, &world_ref)
+            } else if buffer.starts_with(debug_index) {
+                handle_debug_index(&stream, &address_ref, &world_ref)
             } else if buffer.starts_with(world_status) {
                 handle_world_status(&stream, &world_ref)
             } else if buffer.starts_with(websocket) {
@@ -135,6 +137,7 @@ struct IndexTemplate<'a> {
     host_address: &'a str,
     width: i32,
     height: i32,
+    debug: bool,
 }
 
 const HTTP_OK: &str = "HTTP/1.1 200 OK\r\n\r\n";
@@ -145,16 +148,39 @@ fn handle_index(
     address_ref: &str,
     world_ref: &Arc<RwLock<ConfiguredWorld>>,
 ) {
+    // SECURITY: Even with debug = false, the ws could send arbitrary data
+    // This is decidedly unsecure but better than nothing
     let w = &world_ref.read().unwrap();
-    let hello = IndexTemplate {
+    let content = IndexTemplate {
         host_address: &address_ref,
         height: w.world.height,
         width: w.world.width,
+        debug: false,
     };
-    let contents = hello.render().unwrap();
-    let response = format!("{}{}", HTTP_OK, contents);
+    let response = format!("{}{}", HTTP_OK, content);
 
-    stream.read(&mut [0; 512]).unwrap();
+    stream.read(&mut [0; 512]).unwrap(); // Ensure stream is empty before writing
+    stream.write(response.as_bytes()).unwrap();
+    stream.flush().unwrap();
+}
+
+fn handle_debug_index(
+    mut stream: &TcpStream,
+    address_ref: &str,
+    world_ref: &Arc<RwLock<ConfiguredWorld>>,
+) {
+    // SECURITY: Even with debug = false, the ws could send arbitrary data
+    // This is decidedly unsecure but better than nothing
+    let w = &world_ref.read().unwrap();
+    let content = IndexTemplate {
+        host_address: &address_ref,
+        height: w.world.height,
+        width: w.world.width,
+        debug: true,
+    };
+    let response = format!("{}{}", HTTP_OK, content);
+
+    stream.read(&mut [0; 512]).unwrap(); // Ensure stream is empty before writing
     stream.write(response.as_bytes()).unwrap();
     stream.flush().unwrap();
 }

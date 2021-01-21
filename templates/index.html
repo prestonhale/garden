@@ -20,9 +20,11 @@
   <body>
     <div id="output"></div>
     <canvas id="game-canvas"></canvas>
-    <button id="pause-button">⏸️</button>
-    <button id="update-button">>>️</button>
-    <input type="range" min="1" max="20" value="10" class="slider" id="tickrate">
+    {% if debug %}
+      <button id="pause-button">⏸️</button>
+      <button id="update-button">>>️</button>
+      <input type="range" min="1" max="20" value="10" class="slider" id="tickrate">
+    {% endif %}
     <script>
       const CELL_SIZE = 15;
       const GREEN = "#009933";
@@ -85,30 +87,6 @@
 
       var paused = false;
 
-      // Triggering pauses from multiple, different browsers will cause weird behavior
-      // Just not worth syncing this up atm as it'll only ever be me debugging
-      const togglePauseWorld = (evt) => {
-        if (paused == false) {
-          paused = true;
-          document.getElementById("pause-button").innerHTML = "▶";
-          doSend("pause");
-        } else {
-          paused = false;
-          document.getElementById("pause-button").innerHTML = "⏸️️";
-          doSend("unpause")
-        }
-      }
-      
-      const updateWorld = (evt) => {
-        console.log("update");
-        doSend("update");
-      }
-
-      const updateTickRate = (evt) => {
-        value = document.getElementById("tickrate").value;
-        tickRate = 200 - ((value - 1) * 10)
-        doSend("tickrate-" + tickRate);
-      }
 
       function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -155,9 +133,36 @@
 
       window.addEventListener("load", update, false);
 
+      {% if debug %}
+      // Triggering pauses from multiple, different browsers will cause weird behavior
+      // Just not worth syncing this up atm as it'll only ever be me debugging
+      const togglePauseWorld = (evt) => {
+        if (paused == false) {
+          paused = true;
+          document.getElementById("pause-button").innerHTML = "▶";
+          doSend("pause");
+        } else {
+          paused = false;
+          document.getElementById("pause-button").innerHTML = "⏸️️";
+          doSend("unpause")
+        }
+      }
+      
+      const updateWorld = (evt) => {
+        console.log("update");
+        doSend("update");
+      }
+
+      const updateTickRate = (evt) => {
+        value = document.getElementById("tickrate").value;
+        tickRate = 200 - ((value - 1) * 10)
+        doSend("tickrate-" + tickRate);
+      }
+
       document.getElementById("pause-button").addEventListener("click", togglePauseWorld);
       document.getElementById("update-button").addEventListener("click", updateWorld);
       document.getElementById("tickrate").addEventListener("change", updateTickRate);
+      {% endif %}
 
   </script>
   </body>
