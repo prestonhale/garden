@@ -22,6 +22,7 @@
     <canvas id="game-canvas"></canvas>
     <button id="pause-button">⏸️</button>
     <button id="update-button">>>️</button>
+    <input type="range" min="1" max="20" value="10" class="slider" id="tickrate">
     <script>
       const CELL_SIZE = 15;
       const GREEN = "#009933";
@@ -103,6 +104,12 @@
         doSend("update");
       }
 
+      const updateTickRate = (evt) => {
+        value = document.getElementById("tickrate").value;
+        tickRate = 200 - ((value - 1) * 10)
+        doSend("tickrate-" + tickRate);
+      }
+
       function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
       }
@@ -150,6 +157,7 @@
 
       document.getElementById("pause-button").addEventListener("click", togglePauseWorld);
       document.getElementById("update-button").addEventListener("click", updateWorld);
+      document.getElementById("tickrate").addEventListener("change", updateTickRate);
 
   </script>
   </body>

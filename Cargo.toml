@@ -17,9 +17,8 @@ base64 = "0.13.0"
 tungstenite = "0.11.1"
 petgraph = "0.5.1"
 pathfinding = "2.1.1"
-
-# Console Renderer
-console = "0.13.0"
+log = "0.4"
+pretty_env_logger = "0.4"
 
 [dev-dependencies]
 native-tls = "0.2.6"

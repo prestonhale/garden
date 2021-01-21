@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use rand::distributions::{Distribution, Standard};
-use rand::prelude::*;
 use rand::seq::SliceRandom;
 use rand::Rng;
 
 use std::fmt::Debug;
+
+use log;
 
 use serde::{Deserialize, Serialize};
 
@@ -127,7 +128,8 @@ impl World {
                 color: String::from(entity.get_color()),
             });
         }
-        // let render_time = start.elapsed().as_millis() as u64;
+        let render_time = start.elapsed().as_millis() as u64;
+        log::info!("Time to render world: {}", render_time);
         rendered_entities
     }
 
@@ -556,7 +558,7 @@ mod eater {
                     let mut next_position = self.position;
 
                     // trying and failing 4 times means the entity is surrounded
-                    for i in 0..CARDINAL_DIRECTIONS.len() - 1 {
+                    for _ in 0..CARDINAL_DIRECTIONS.len() - 1 {
                         // TODO: Cache path until its done or a collision is detected
                         let pathfind_response =
                             self.pathfind(food_entity.get_position(), &ignored_positions, world);
@@ -643,7 +645,10 @@ mod eater {
         fn get_desire(&self, desire: Desire) -> i8 {
             match self.desires.get(&desire) {
                 Some(i) => *i,
-                None => panic!("Asked for desire that isn't on entity"),
+                None => {
+                    log::error!("Asked for desire that isn't on entity");
+                    50 
+                }
             }
         }
 
@@ -660,7 +665,10 @@ mod eater {
         fn get_desire_threshold(&self, desire: Desire) -> i8 {
             match self.desire_threshold.get(&desire) {
                 Some(i) => *i,
-                None => panic!("Asked for desire threshold that isn't on entity"),
+                None => {
+                    log::error!("Asked for desire threshold that isn't on entity");
+                    50
+                }
             }
         }
 

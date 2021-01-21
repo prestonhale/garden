@@ -10,12 +10,13 @@ use std::time::{Duration, Instant};
 
 use rand_core::SeedableRng;
 
+use log;
+use pretty_env_logger;
 use tungstenite::protocol::Message;
 use tungstenite::server::accept;
 
 // Console renderer
 use askama::Template;
-use console::{Term, Style, Color};
 
 mod thread_pool;
 pub mod world;
@@ -34,14 +35,28 @@ impl Config {
     }
 }
 
+pub struct ConfiguredWorld {
+    world: world::World,
+    tick_rate: u64,
+    randomizer: rand_pcg::Pcg32,
+}
+
 pub fn run(config: Config) {
-    let world_ref_counter = Arc::new(RwLock::new(world::World::default()));
+    pretty_env_logger::init();
+
+    let world = world::World::default();
+    let configured_world = ConfiguredWorld {
+        world: world,
+        tick_rate: TICK_RATE_MS,
+        randomizer: rand_pcg::Pcg32::from_seed(*b"somebody once to"),
+    };
+    let world_ref_counter = Arc::new(RwLock::new(configured_world));
     let primary_world_instance = Arc::clone(&world_ref_counter);
     thread::spawn(move || {
         let mut randomizer = rand_pcg::Pcg32::from_seed(*b"somebody once to");
         let mut start;
         let mut frame_time;
-        // let mut lock_time;
+        let mut lock_time;
         loop {
             start = Instant::now();
 
@@ -52,67 +67,36 @@ pub fn run(config: Config) {
             // This scope is created to ensure the lock is dropped ASAP
             {
                 let mut w = primary_world_instance.write().unwrap();
-                // lock_time = start.elapsed().as_millis();
-                w.update_if_active(&mut randomizer);
+                lock_time = start.elapsed().as_millis();
+                w.world.update_if_active(&mut randomizer);
             }
             frame_time = start.elapsed().as_millis() as u64;
 
-            // println!("Frame processing took: {}; lock time {}", frame_time, lock_time);
-            if frame_time > TICK_RATE_MS {
-                println!("WARNING: Frame processing ({}) took longer than tick rate ({})", frame_time, TICK_RATE_MS);
-                frame_time = TICK_RATE_MS; // Prevent subtraction below from going negative
+            log::info!(
+                "Frame processing took: {} (time to acquire lock: {})",
+                frame_time,
+                lock_time
+            );
+            {
+                let w = primary_world_instance.read().unwrap();
+                if frame_time > w.tick_rate {
+                    log::warn!(
+                        "WARNING: Frame processing ({}) took longer than tick rate ({})",
+                        frame_time,
+                        w.tick_rate
+                    );
+                    frame_time = w.tick_rate; // Prevent subtraction below from going negative
+                }
+                thread::sleep(Duration::from_millis(w.tick_rate - frame_time));
             }
-
-            thread::sleep(Duration::from_millis(TICK_RATE_MS - frame_time));
         }
     });
 
-    if cfg!(feature = "console-renderer") {
-        // Console Renderer
-        let world_instance = Arc::clone(&world_ref_counter);
-        loop {
-            let term = Term::stdout();
-            // Scope allows us to rapidly release world lock
-            let world_height;
-            let world_width;
-            let rendered_entities;
-            {
-                let world = world_instance.read().unwrap();
-                rendered_entities = world.render();
-                world_height = *world.get_height(); // could be cached
-                world_width = *world.get_height(); // could be cached
-            }
-            
-            match term.clear_screen() {
-                Ok(_) => (),
-                _ => panic!("Failed to clear screen"),
-            };
-            for y in 0..world_height {
-                for x in 0..world_width{
-                    let mut style = Style::new().bg(Color::Green);  // default background color
-                    for entity in rendered_entities.iter() {
-                        if entity.position.x == x && entity.position.y == y {
-                            style = match &entity.color[..] {
-                                world::RED => style.bg(Color::Red),
-                                world::BROWN => style.bg(Color::Yellow),
-                                world::BLACK => style.bg(Color::Black),
-                                _ => style.bg(Color::Magenta) // Magenta, the color of "oh no"
-                            };
-                        }
-                    }
-                    print!("{}", style.apply_to("  "))
-                }
-                println!("")
-            }
-            thread::sleep(Duration::from_millis(TICK_RATE_MS));
-        }
-    } else {
-        start_tcp_server(&world_ref_counter, config);
-    }
+    start_tcp_server(&world_ref_counter, config);
 }
 
-pub fn start_tcp_server(world_ref_counter: &Arc<RwLock<world::World>>, config: Config) {
-    println!("Server started");
+pub fn start_tcp_server(world_ref_counter: &Arc<RwLock<ConfiguredWorld>>, config: Config) {
+    log::info!("Server started");
     let listener = TcpListener::bind("0.0.0.0:7878").unwrap();
     let pool = thread_pool::ThreadPool::new(4);
 
@@ -153,30 +137,38 @@ struct IndexTemplate<'a> {
     height: i32,
 }
 
-fn handle_index(mut stream: &TcpStream, address_ref: &str, world_ref: &Arc<RwLock<world::World>>) {
+const HTTP_OK: &str = "HTTP/1.1 200 OK\r\n\r\n";
+const HTTP_SERVER_ERROR: &str = "HTTP/1.1 200 OK\r\n\r\n";
+
+fn handle_index(
+    mut stream: &TcpStream,
+    address_ref: &str,
+    world_ref: &Arc<RwLock<ConfiguredWorld>>,
+) {
     let w = &world_ref.read().unwrap();
     let hello = IndexTemplate {
         host_address: &address_ref,
-        height: w.height,
-        width: w.width,
+        height: w.world.height,
+        width: w.world.width,
     };
     let contents = hello.render().unwrap();
-    let status_line = "HTTP/1.1 200 OK\r\n\r\n";
-    let response = format!("{}{}", status_line, contents);
-    
-    stream.read(&mut [0;512]).unwrap();
+    let response = format!("{}{}", HTTP_OK, contents);
+
+    stream.read(&mut [0; 512]).unwrap();
     stream.write(response.as_bytes()).unwrap();
     stream.flush().unwrap();
 }
 
-fn handle_world_status(mut stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
-    let status_line = "HTTP/1.1 200 OK\r\n\r\n";
+fn handle_world_status(mut stream: &TcpStream, world_ref: &Arc<RwLock<ConfiguredWorld>>) {
     let w = &world_ref.read().unwrap();
-    let rendered_entities = w.render();
+    let rendered_entities = w.world.render();
     let response;
     match serde_json::to_string(&rendered_entities) {
-        Ok(serialized_player) => response = format!("{}{}", status_line, serialized_player),
-        _ => panic!("Unable to serialize player"),
+        Ok(serialized_player) => response = format!("{}{}", HTTP_OK, serialized_player),
+        Err(e) => {
+            log::error!("Unable to serialize player: {}", e);
+            response = String::from(HTTP_SERVER_ERROR);
+        }
     };
 
     // ensure stream is empty before writing
@@ -194,7 +186,6 @@ fn handle_404(mut stream: &TcpStream) {
     let contents = not_found.render().unwrap();
     let status_line = "HTTP/1.1 200 OK\r\n\r\n";
     let response = format!("{}{}", status_line, contents);
-    
     // ensure stream is empty before writing
     let mut buffer = [0; 512]; // Dynamically size; will overflow as world size grows
     stream.read(&mut buffer).unwrap();
@@ -202,35 +193,32 @@ fn handle_404(mut stream: &TcpStream) {
     stream.flush().unwrap();
 }
 
-fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
+fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<ConfiguredWorld>>) {
     let mut websocket = accept(stream).unwrap();
     websocket.get_mut().set_nodelay(true).unwrap(); // Disables Nagle's Algorithm, reduces stream delays
     websocket.get_mut().set_nonblocking(true).unwrap();
-    
-    // let mut start_time;
-    // let mut socket_loop_time;
+    let mut tick_rate;
     loop {
-        // start_time = Instant::now();
         match websocket.read_message() {
-            Ok(msg) => {
-                match msg {
-                    Message::Close(_) => {
-                        if let Err(e) = websocket.close(None) {
-                            if let tungstenite::Error::ConnectionClosed = e {
-                                return
-                            } else if let tungstenite::Error::Io(_) = e {
-                                return
-                            } else {
-                                panic!("Unexpected error closing websocket: {:?}", e)
-                            };
-                        }
-                        return;
-                    },
-                    Message::Text(msg_string) => {
-                        handle_ws_text_msg(&msg_string[..], world_ref);
-                    },
-                    _ => panic!("received unrecognized type of websocket message")
+            Ok(msg) => match msg {
+                Message::Close(_) => {
+                    if let Err(e) = websocket.close(None) {
+                        if let tungstenite::Error::ConnectionClosed = e {
+                            log::warn!("Attempted to close websocket but it was already closed");
+                            return;
+                        } else if let tungstenite::Error::Io(_) = e {
+                            log::warn!("Attempted to close websocket but got unknown error: {}", e);
+                            return;
+                        } else {
+                            log::error!("Unexpected error while closing websocket: {}", e);
+                        };
+                    }
+                    return;
                 }
+                Message::Text(msg_string) => {
+                    handle_ws_text_msg(&msg_string[..], world_ref);
+                }
+                _ => log::error!("Unexpected type of websocket message: {}", msg),
             },
             Err(e) => {
                 match e {
@@ -238,7 +226,10 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
                     tungstenite::Error::AlreadyClosed => return,
                     // IO errors such as WouldBlock can be ignored as we're not blocking
                     tungstenite::Error::Io(_) => (),
-                    _ => panic!("Got unexpected websocket error: {:?}", e),
+                    _ => {
+                        log::error!("Unexpected websocker error: {}", e);
+                        return;
+                    }
                 }
             }
         };
@@ -247,39 +238,47 @@ fn handle_websocket(stream: &TcpStream, world_ref: &Arc<RwLock<world::World>>) {
         // Scope reduces time the world lock is held
         {
             let w = world_ref.read().unwrap();
-            rendered_entities = w.render();
+            rendered_entities = w.world.render();
+            tick_rate = w.tick_rate;
         }
         // TODO: Re-rendering the entites for every open websocket is unecessary
         match serde_json::to_string(&rendered_entities) {
             Ok(serialized_player) => result = format!("{}", serialized_player),
-            _ => panic!("Unable to serialize player"),
+            Err(e) => {
+                log::error!("Unable to serialize player: {}", e);
+                return;
+            }
         };
         let response = Message::text(result);
         websocket.write_message(response).unwrap();
 
-        // socket_loop_time = start_time.elapsed().as_millis();
-        // println!("Socket loop took: {}", socket_loop_time);
-
-        thread::sleep(Duration::from_millis(TICK_RATE_MS));
+        thread::sleep(Duration::from_millis(tick_rate));
     }
 }
 
-fn handle_ws_text_msg(msg_string: &str, world_ref: &Arc<RwLock<world::World>>) {
-    println!("ws received: {}", msg_string);
-    match msg_string{
+fn handle_ws_text_msg(msg_string: &str, world_ref: &Arc<RwLock<ConfiguredWorld>>) {
+    match msg_string {
         "pause" => {
             let mut w = world_ref.write().unwrap();
-            w.pause();
-        },
+            w.world.pause();
+        }
         "unpause" => {
             let mut w = world_ref.write().unwrap();
-            w.unpause();
-        },
-        "update" => {
-            let mut w = world_ref.write().unwrap();
-            w.request_manual_update();
+            w.world.unpause();
         }
-        _ => panic!("unknown websocket message received")
+        "update" => {
+            let w = &mut *world_ref.write().unwrap();
+            w.world.update(&mut w.randomizer);
+        }
+        // For now, assume anything with a number is a tick rate change
+        tick_rate if tick_rate.chars().any(|c| c.is_numeric()) => {
+            let w = &mut *world_ref.write().unwrap();
+            let tick_rate_vector: Vec<u32> =
+                tick_rate.chars().filter_map(|c| c.to_digit(10)).collect();
+            let new_tick_rate = tick_rate_vector.iter().fold(0, |acc, elem| acc * 10 + elem);
+            w.tick_rate = new_tick_rate as u64;
+        }
+        _ => log::warn!("Unknown websocket text message: {}", msg_string),
     }
 }
 
@@ -299,7 +298,8 @@ mod tests {
     #[test]
     fn test_handle_index() {
         let _ = spawn(move || {
-            let server = TcpListener::bind("localhost:7880").expect("Can't listen, is port already used?");
+            let server =
+                TcpListener::bind("localhost:7880").expect("Can't listen, is port already used?");
             let world_ref_counter = Arc::new(RwLock::new(world::World::default()));
             let stream = server.incoming().next().unwrap().unwrap();
             let mock_config = get_mock_config();
@@ -317,24 +317,23 @@ mod tests {
         assert!(response.contains(expected_response));
     }
 
-    // Websocket testing fn borrowed from: 
+    // Websocket testing fn borrowed from:
     // https://github.com/snapview/tungstenite-rs/blob/master/tests/connection_reset.rs
     type Sock = WebSocket<Stream<TcpStream, TlsStream<TcpStream>>>;
 
     fn do_test<CT>(client_task: CT)
     where
-        CT: FnOnce(Sock) + Send + 'static
+        CT: FnOnce(Sock) + Send + 'static,
     {
         spawn(|| {
             sleep(Duration::from_secs(5));
             println!("Unit test executed too long, perhaps stuck on WOULDBLOCK...");
         });
-        
-        let server = TcpListener::bind("localhost:7881").expect("Can't listen, is port already used?");
 
+        let server =
+            TcpListener::bind("localhost:7881").expect("Can't listen, is port already used?");
         let client_thread = spawn(move || {
-            let (client, _) = connect("ws://localhost:7881/socket")
-                .expect("Can't connect to port");
+            let (client, _) = connect("ws://localhost:7881/socket").expect("Can't connect to port");
             client_task(client);
         });
 
@@ -365,26 +364,24 @@ mod tests {
 
     #[test]
     fn test_handle_websocket() {
-        do_test(
-            |mut cli_sock| {
-                sleep(Duration::from_secs(1));
-                println!("Starting ws client...");
+        do_test(|mut cli_sock| {
+            sleep(Duration::from_secs(1));
+            println!("Starting ws client...");
 
-                let first_message = cli_sock.read_message().unwrap();
-                assert!(first_message.is_text());
-                println!("  First message!");
+            let first_message = cli_sock.read_message().unwrap();
+            assert!(first_message.is_text());
+            println!("  First message!");
 
-                thread::sleep(Duration::from_millis(TICK_RATE_MS));
+            thread::sleep(Duration::from_millis(TICK_RATE_MS));
 
-                let second_message = cli_sock.read_message().unwrap();
-                assert!(second_message.is_text());
-                println!("  Second message!");
+            let second_message = cli_sock.read_message().unwrap();
+            assert!(second_message.is_text());
+            println!("  Second message!");
 
-                // Check that a different world state was returned
-                
-                println!("...closing ws client.");
-                cli_sock.close(None).unwrap();
-            },
-        );
+            // Check that a different world state was returned
+
+            println!("...closing ws client.");
+            cli_sock.close(None).unwrap();
+        });
     }
 }
